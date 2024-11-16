@@ -6,7 +6,7 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
-public class PaperMCServerManager extends JFrame {
+public class App extends JFrame {
 
     private static final String PAPERMC_URL = "https://api.papermc.io/v2/projects/paper/versions/1.21.1/builds/123/downloads/paper-1.21.1-123.jar";
     private static final String FILENAME = "paper-1.21.1-123.jar";
@@ -17,7 +17,7 @@ public class PaperMCServerManager extends JFrame {
     private JProgressBar progressBar;
     private JTextArea consoleArea;
 
-    public PaperMCServerManager() {
+    public App() {
         setTitle("PaperMC Server Manager");
         setSize(800, 500);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -211,7 +211,7 @@ public class PaperMCServerManager extends JFrame {
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
-            PaperMCServerManager manager = new PaperMCServerManager();
+            App manager = new App();
             manager.setVisible(true);
         });
     }
