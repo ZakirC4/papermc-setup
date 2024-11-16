@@ -1,7 +1,6 @@
 import javax.swing.*;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
+import java.awt.event.*;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -11,30 +10,38 @@ public class App extends JFrame {
     private static final String PAPERMC_URL = "https://api.papermc.io/v2/projects/paper/versions/1.21.1/builds/123/downloads/paper-1.21.1-123.jar";
     private static final String FILENAME = "paper-1.21.1-123.jar";
     private static final String EULA_FILENAME = "eula.txt";
+    private static final String SERVER_PROPERTIES_FILENAME = "server.properties";
 
     private JTextField directoryField;
-    private JButton chooseDirButton, downloadButton, startServerButton;
     private JProgressBar progressBar;
     private JTextArea consoleArea;
 
+    private Process serverProcess;
+    private BufferedWriter serverInputWriter;
+
+    private File serverDirectory;
+
     public App() {
         setTitle("PaperMC Server Manager");
-        setSize(800, 500);
+        setSize(800, 600);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+
+        // Ensure server is shut down on app close
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent windowEvent) {
+                stopServer();
+            }
+        });
 
         // UI Components
         JPanel panel = new JPanel();
-        panel.setLayout(new GridLayout(5, 1));
+        panel.setLayout(new GridLayout(1, 2));
 
-        JPanel dirPanel = new JPanel(new BorderLayout());
         directoryField = new JTextField();
-        chooseDirButton = new JButton("Choose Directory");
-        dirPanel.add(directoryField, BorderLayout.CENTER);
-        dirPanel.add(chooseDirButton, BorderLayout.EAST);
-
-        downloadButton = new JButton("Download Server");
-        startServerButton = new JButton("Start Server");
-        startServerButton.setEnabled(false);
+        JButton chooseDirButton = new JButton("Choose Directory");
+        panel.add(directoryField);
+        panel.add(chooseDirButton);
 
         progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
@@ -43,36 +50,53 @@ public class App extends JFrame {
         consoleArea.setEditable(false);
         JScrollPane scrollPane = new JScrollPane(consoleArea);
 
-        panel.add(new JLabel("Select Output Directory:"));
-        panel.add(dirPanel);
-        panel.add(downloadButton);
-        panel.add(progressBar);
-        panel.add(startServerButton);
+        // Menu bar
+        JMenuBar menuBar = new JMenuBar();
 
-        add(panel, BorderLayout.NORTH);
-        add(scrollPane, BorderLayout.CENTER);
+        JMenu fileMenu = new JMenu("File");
+        JMenu serverMenu = new JMenu("Server");
+
+        JMenuItem downloadItem = new JMenuItem("Download Server");
+        JMenuItem startItem = new JMenuItem("Start Server");
+        JMenuItem stopItem = new JMenuItem("Stop Server");
+        JMenuItem saveItem = new JMenuItem("Save All");
+        JMenuItem sendCommandItem = new JMenuItem("Send Command");
+        JMenuItem modifyPropertiesItem = new JMenuItem("Modify server.properties");
+
+        // Add keyboard shortcuts
+        downloadItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.CTRL_DOWN_MASK));
+        startItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_R, InputEvent.CTRL_DOWN_MASK));
+        stopItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_Q, InputEvent.CTRL_DOWN_MASK));
+        saveItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK));
+        sendCommandItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK));
+        modifyPropertiesItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_P, InputEvent.CTRL_DOWN_MASK));
+
+        // Add menu items
+        fileMenu.add(downloadItem);
+        fileMenu.add(modifyPropertiesItem);
+        serverMenu.add(startItem);
+        serverMenu.add(stopItem);
+        serverMenu.add(saveItem);
+        serverMenu.add(sendCommandItem);
+
+        menuBar.add(fileMenu);
+        menuBar.add(serverMenu);
+
+        setJMenuBar(menuBar);
 
         // Button Actions
-        chooseDirButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                chooseDirectory();
-            }
-        });
+        chooseDirButton.addActionListener(e -> chooseDirectory());
+        downloadItem.addActionListener(e -> downloadServer());
+        startItem.addActionListener(e -> startServer());
+        stopItem.addActionListener(e -> stopServer());
+        saveItem.addActionListener(e -> saveAll());
+        sendCommandItem.addActionListener(e -> sendCommand());
+        modifyPropertiesItem.addActionListener(e -> openServerProperties());
 
-        downloadButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                downloadServer();
-            }
-        });
-
-        startServerButton.addActionListener(new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                startServer();
-            }
-        });
+        // Layout
+        add(panel, BorderLayout.NORTH);
+        add(progressBar, BorderLayout.SOUTH);
+        add(scrollPane, BorderLayout.CENTER);
     }
 
     private void chooseDirectory() {
@@ -81,8 +105,8 @@ public class App extends JFrame {
         int result = fileChooser.showOpenDialog(this);
 
         if (result == JFileChooser.APPROVE_OPTION) {
-            File selectedDir = fileChooser.getSelectedFile();
-            directoryField.setText(selectedDir.getAbsolutePath());
+            serverDirectory = fileChooser.getSelectedFile();
+            directoryField.setText(serverDirectory.getAbsolutePath());
         }
     }
 
@@ -93,8 +117,8 @@ public class App extends JFrame {
             return;
         }
 
-        File outputDir = new File(directory);
-        if (!outputDir.exists()) {
+        serverDirectory = new File(directory);
+        if (!serverDirectory.exists()) {
             JOptionPane.showMessageDialog(this, "Directory does not exist!", "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -103,20 +127,19 @@ public class App extends JFrame {
         new Thread(() -> {
             try {
                 // Download the file
-                File jarFile = new File(outputDir, FILENAME);
+                File jarFile = new File(serverDirectory, FILENAME);
                 downloadFileWithProgress(PAPERMC_URL, jarFile);
 
                 // Create EULA file
-                File eulaFile = new File(outputDir, EULA_FILENAME);
+                File eulaFile = new File(serverDirectory, EULA_FILENAME);
                 try (FileWriter writer = new FileWriter(eulaFile)) {
                     writer.write("eula=true");
                 }
 
                 // Create start script
-                createStartScript(outputDir);
+                createStartScript(serverDirectory);
 
                 JOptionPane.showMessageDialog(this, "Server downloaded and setup successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
-                startServerButton.setEnabled(true);
 
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
@@ -125,6 +148,7 @@ public class App extends JFrame {
     }
 
     private void downloadFileWithProgress(String fileUrl, File outputFile) throws IOException {
+        @SuppressWarnings("deprecation")
         HttpURLConnection connection = (HttpURLConnection) new URL(fileUrl).openConnection();
         connection.setRequestMethod("GET");
 
@@ -155,11 +179,9 @@ public class App extends JFrame {
         String content;
 
         if (System.getProperty("os.name").toLowerCase().contains("win")) {
-            // Windows batch file
             scriptFile = new File(outputDir, "start.bat");
             content = "@echo off\njava -jar " + FILENAME + " nogui\npause";
         } else {
-            // Unix shell script
             scriptFile = new File(outputDir, "start.sh");
             content = "#!/bin/sh\njava -jar " + FILENAME + " nogui";
             scriptFile.setExecutable(true);
@@ -185,10 +207,12 @@ public class App extends JFrame {
             try {
                 ProcessBuilder pb = new ProcessBuilder(scriptFile.getAbsolutePath());
                 pb.directory(outputDir);
-                Process process = pb.start();
+                serverProcess = pb.start();
+
+                serverInputWriter = new BufferedWriter(new OutputStreamWriter(serverProcess.getOutputStream()));
 
                 // Read process output
-                BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                BufferedReader reader = new BufferedReader(new InputStreamReader(serverProcess.getInputStream()));
                 String line;
 
                 while ((line = reader.readLine()) != null) {
@@ -205,8 +229,102 @@ public class App extends JFrame {
         }).start();
     }
 
-    private void appendToConsole(String text) {
-        SwingUtilities.invokeLater(() -> consoleArea.append(text + "\n"));
+    private void stopServer() {
+        if (serverProcess != null && serverProcess.isAlive()) {
+            try {
+                serverInputWriter.write("stop\n");
+                serverInputWriter.flush();
+                serverProcess.destroy();
+                appendToConsole("Server stopped.");
+            } catch (IOException ex) {
+                appendToConsole("Error stopping server: " + ex.getMessage());
+            }
+        }
+    }
+
+    private void saveAll() {
+        if (serverProcess != null && serverProcess.isAlive()) {
+            try {
+                serverInputWriter.write("save-all\n");
+                serverInputWriter.flush();
+                appendToConsole("Save-all command sent.");
+            } catch (IOException ex) {
+                appendToConsole("Error sending save-all command: " + ex.getMessage());
+            }
+        }
+    }
+
+    private void sendCommand() {
+        if (serverProcess != null && serverProcess.isAlive()) {
+            String command = JOptionPane.showInputDialog(this, "Enter command to send to the server:");
+            if (command != null && !command.trim().isEmpty()) {
+                try {
+                    serverInputWriter.write(command + "\n");
+                    serverInputWriter.flush();
+                    appendToConsole("Command sent: " + command);
+                } catch (IOException ex) {
+                    appendToConsole("Error sending command: " + ex.getMessage());
+                }
+            }
+        } else {
+            JOptionPane.showMessageDialog(this, "Server is not running!", "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void openServerProperties() {
+        File propertiesFile = new File(serverDirectory, SERVER_PROPERTIES_FILENAME);
+        if (propertiesFile.exists()) {
+            try {
+                StringBuilder content = new StringBuilder();
+                BufferedReader reader = new BufferedReader(new FileReader(propertiesFile));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    content.append(line).append("\n");
+                }
+                reader.close();
+
+                // Create a scrollable text area for the properties file content
+                JTextArea textArea = new JTextArea(content.toString());
+                textArea.setCaretPosition(0);  // Set cursor to the top of the file
+                JScrollPane scrollPane = new JScrollPane(textArea);
+
+                // Create the dialog for editing server.properties
+                JDialog editDialog = new JDialog(this, "Edit server.properties", true);
+                editDialog.setSize(500, 400);
+                editDialog.setLocationRelativeTo(this);
+
+                // Add Save button to the dialog
+                JPanel dialogPanel = new JPanel(new BorderLayout());
+                dialogPanel.add(scrollPane, BorderLayout.CENTER);
+
+                JPanel buttonPanel = new JPanel();
+                JButton saveButton = new JButton("Save");
+                buttonPanel.add(saveButton);
+                dialogPanel.add(buttonPanel, BorderLayout.SOUTH);
+
+                saveButton.addActionListener(e -> {
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(propertiesFile))) {
+                        writer.write(textArea.getText());
+                        appendToConsole("server.properties updated.");
+                        editDialog.dispose();
+                    } catch (IOException ex) {
+                        appendToConsole("Error saving server.properties: " + ex.getMessage());
+                    }
+                });
+
+                editDialog.getContentPane().add(dialogPanel);
+                editDialog.setVisible(true);
+
+            } catch (IOException ex) {
+                appendToConsole("Error opening server.properties: " + ex.getMessage());
+            }
+        } else {
+            JOptionPane.showMessageDialog(this, "server.properties file does not exist!", "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void appendToConsole(String message) {
+        SwingUtilities.invokeLater(() -> consoleArea.append(message + "\n"));
     }
 
     public static void main(String[] args) {
