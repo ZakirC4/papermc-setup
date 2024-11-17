@@ -8,6 +8,10 @@ import java.net.URL;
 public class App extends JFrame {
 
     private static final String PAPERMC_URL = "https://api.papermc.io/v2/projects/paper/versions/1.21.1/builds/123/downloads/paper-1.21.1-123.jar";
+    private static final String GEYSERMC_URL = "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot";
+    private static final String FLOODGATE_URL = "https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot";
+    private static final String VIAVERSION_URL = "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaVersion/versions/5.1.1/PAPER/ViaVersion-5.1.1.jar";
+
     private static final String FILENAME = "paper-1.21.1-123.jar";
     private static final String EULA_FILENAME = "eula.txt";
     private static final String SERVER_PROPERTIES_FILENAME = "server.properties";
@@ -62,6 +66,9 @@ public class App extends JFrame {
         JMenuItem saveItem = new JMenuItem("Save All");
         JMenuItem sendCommandItem = new JMenuItem("Send Command");
         JMenuItem modifyPropertiesItem = new JMenuItem("Modify server.properties");
+        JMenuItem downloadGeyserItem = new JMenuItem("Download GeyserMC");
+        JMenuItem downloadFloodgateItem = new JMenuItem("Download Floodgate");
+        JMenuItem downloadViaVersionItem = new JMenuItem("Download ViaVersion");
 
         // Add keyboard shortcuts
         downloadItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.CTRL_DOWN_MASK));
@@ -70,10 +77,15 @@ public class App extends JFrame {
         saveItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_S, InputEvent.CTRL_DOWN_MASK));
         sendCommandItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_C, InputEvent.CTRL_DOWN_MASK));
         modifyPropertiesItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_P, InputEvent.CTRL_DOWN_MASK));
+        downloadGeyserItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_G, InputEvent.CTRL_DOWN_MASK));
+        downloadFloodgateItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F, InputEvent.CTRL_DOWN_MASK));
 
         // Add menu items
         fileMenu.add(downloadItem);
         fileMenu.add(modifyPropertiesItem);
+        fileMenu.add(downloadGeyserItem);
+        fileMenu.add(downloadFloodgateItem);
+        fileMenu.add(downloadViaVersionItem);
         serverMenu.add(startItem);
         serverMenu.add(stopItem);
         serverMenu.add(saveItem);
@@ -92,6 +104,9 @@ public class App extends JFrame {
         saveItem.addActionListener(e -> saveAll());
         sendCommandItem.addActionListener(e -> sendCommand());
         modifyPropertiesItem.addActionListener(e -> openServerProperties());
+        downloadGeyserItem.addActionListener(e -> downloadPlugin(GEYSERMC_URL, "GeyserMC"));
+        downloadFloodgateItem.addActionListener(e -> downloadPlugin(FLOODGATE_URL, "Floodgate"));
+        downloadViaVersionItem.addActionListener(e -> downloadPlugin(VIAVERSION_URL, "ViaVersion"));
 
         // Layout
         add(panel, BorderLayout.NORTH);
@@ -111,17 +126,7 @@ public class App extends JFrame {
     }
 
     private void downloadServer() {
-        String directory = directoryField.getText();
-        if (directory.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please select a directory first!", "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        serverDirectory = new File(directory);
-        if (!serverDirectory.exists()) {
-            JOptionPane.showMessageDialog(this, "Directory does not exist!", "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
+        if (!checkServerDirectory()) return;
 
         progressBar.setValue(0);
         new Thread(() -> {
@@ -145,6 +150,43 @@ public class App extends JFrame {
                 JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
         }).start();
+    }
+
+    private void downloadPlugin(String pluginUrl, String pluginName) {
+        if (!checkServerDirectory()) return;
+
+        File pluginsDir = new File(serverDirectory, "plugins");
+        if (!pluginsDir.exists() && !pluginsDir.mkdirs()) {
+            JOptionPane.showMessageDialog(this, "Failed to create plugins directory!", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        progressBar.setValue(0);
+        new Thread(() -> {
+            try {
+                File pluginFile = new File(pluginsDir, pluginName + ".jar");
+                downloadFileWithProgress(pluginUrl, pluginFile);
+                JOptionPane.showMessageDialog(this, pluginName + " downloaded successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Error downloading " + pluginName + ": " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        }).start();
+    }
+
+    private boolean checkServerDirectory() {
+        String directory = directoryField.getText();
+        if (directory.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please select a directory first!", "Error", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        serverDirectory = new File(directory);
+        if (!serverDirectory.exists()) {
+            JOptionPane.showMessageDialog(this, "Directory does not exist!", "Error", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        return true;
     }
 
     private void downloadFileWithProgress(String fileUrl, File outputFile) throws IOException {
@@ -193,77 +235,77 @@ public class App extends JFrame {
     }
 
     private void startServer() {
-        String directory = directoryField.getText();
-        if (directory.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Please select a directory first!", "Error", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        File outputDir = new File(directory);
-        String scriptFileName = System.getProperty("os.name").toLowerCase().contains("win") ? "start.bat" : "start.sh";
-        File scriptFile = new File(outputDir, scriptFileName);
+        if (!checkServerDirectory()) return;
 
         new Thread(() -> {
             try {
-                ProcessBuilder pb = new ProcessBuilder(scriptFile.getAbsolutePath());
-                pb.directory(outputDir);
-                serverProcess = pb.start();
+                File jarFile = new File(serverDirectory, FILENAME);
 
-                serverInputWriter = new BufferedWriter(new OutputStreamWriter(serverProcess.getOutputStream()));
-
-                // Read process output
-                BufferedReader reader = new BufferedReader(new InputStreamReader(serverProcess.getInputStream()));
-                String line;
-
-                while ((line = reader.readLine()) != null) {
-                    appendToConsole(line);
+                if (!jarFile.exists()) {
+                    JOptionPane.showMessageDialog(this, "Server jar file not found. Please download it first!", "Error", JOptionPane.ERROR_MESSAGE);
+                    return;
                 }
 
-                reader.close();
+                ProcessBuilder builder = new ProcessBuilder("java", "-jar", jarFile.getAbsolutePath(), "nogui");
+                builder.directory(serverDirectory);
+                builder.redirectErrorStream(true);
 
-                JOptionPane.showMessageDialog(this, "Server process completed.", "Info", JOptionPane.INFORMATION_MESSAGE);
+                serverProcess = builder.start();
+                serverInputWriter = new BufferedWriter(new OutputStreamWriter(serverProcess.getOutputStream()));
 
-            } catch (IOException ex) {
-                appendToConsole("Error starting server: " + ex.getMessage());
+                // Read server output
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(serverProcess.getInputStream()))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) {
+                        String output = line;
+                        SwingUtilities.invokeLater(() -> consoleArea.append(output + "\n"));
+                    }
+                }
+
+            } catch (Exception ex) {
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(this, "Error starting server: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE));
             }
         }).start();
     }
 
     private void stopServer() {
-        if (serverProcess != null && serverProcess.isAlive()) {
+        if (serverProcess != null) {
             try {
                 serverInputWriter.write("stop\n");
                 serverInputWriter.flush();
-                serverProcess.destroy();
-                appendToConsole("Server stopped.");
-            } catch (IOException ex) {
-                appendToConsole("Error stopping server: " + ex.getMessage());
+                serverProcess.waitFor();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Error stopping server: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+            } finally {
+                serverProcess = null;
+                serverInputWriter = null;
             }
         }
     }
 
     private void saveAll() {
-        if (serverProcess != null && serverProcess.isAlive()) {
+        if (serverProcess != null) {
             try {
                 serverInputWriter.write("save-all\n");
                 serverInputWriter.flush();
-                appendToConsole("Save-all command sent.");
+                JOptionPane.showMessageDialog(this, "All data saved successfully!", "Success", JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException ex) {
-                appendToConsole("Error sending save-all command: " + ex.getMessage());
+                JOptionPane.showMessageDialog(this, "Error saving data: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
             }
+        } else {
+            JOptionPane.showMessageDialog(this, "Server is not running!", "Error", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     private void sendCommand() {
-        if (serverProcess != null && serverProcess.isAlive()) {
-            String command = JOptionPane.showInputDialog(this, "Enter command to send to the server:");
+        if (serverProcess != null) {
+            String command = JOptionPane.showInputDialog(this, "Enter command:", "Send Command", JOptionPane.QUESTION_MESSAGE);
             if (command != null && !command.trim().isEmpty()) {
                 try {
                     serverInputWriter.write(command + "\n");
                     serverInputWriter.flush();
-                    appendToConsole("Command sent: " + command);
                 } catch (IOException ex) {
-                    appendToConsole("Error sending command: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(this, "Error sending command: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         } else {
@@ -328,9 +370,6 @@ public class App extends JFrame {
     }
 
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(() -> {
-            App manager = new App();
-            manager.setVisible(true);
-        });
+        SwingUtilities.invokeLater(() -> new App().setVisible(true));
     }
 }

@@ -10,9 +10,14 @@ public class Console {
     private static BufferedWriter serverInputWriter;
     private static boolean serverRunning = false;
 
+    // URLs of the plugins to download
+    private static final String PLUGIN_GEEZER_MC_URL = "https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot";
+    private static final String PLUGIN_FLOODGATE_URL = "https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot";
+    private static final String PLUGIN_VIAVERSION_URL = "https://hangarcdn.papermc.io/plugins/ViaVersion/ViaVersion/versions/5.1.1/PAPER/ViaVersion-5.1.1.jar";
+
     public static void main(String[] args) {
         if (args.length == 0) {
-            System.out.println("Usage: java Console <command> <directory>");
+            System.out.println("Usage: ./<program>.jar <command> <directory>");
             return;
         }
 
@@ -20,14 +25,20 @@ public class Console {
         String dir = args.length > 1 ? args[1] : ".";  // Default to current directory if not specified
 
         switch (command) {
-            case "download":
+            case "-d":
                 downloadServer(dir);
                 break;
-            case "start":
+            case "-s":
                 startServer(dir);
                 break;
-            case "modify-properties":
+            case "-m":
                 modifyServerProperties(dir);
+                break;
+            case "-p":
+                downloadPlugin(dir);
+                break;
+            case "--help":
+                System.out.println("Commands:\n\t-d\tDownload\n\t-s\tStart\n\t-m\tModify Properties\n\t-p\tAdd Plugins\n");
                 break;
             default:
                 System.out.println("Unknown command: " + command);
@@ -217,6 +228,66 @@ public class Console {
             }
         } catch (IOException e) {
             e.printStackTrace();
+        }
+    }
+
+    // New method to download the plugins
+    private static void downloadPlugin(String dir) {
+        try (Scanner scanner = new Scanner(System.in)) {
+            System.out.println("Select a plugin to download:");
+            System.out.println("1. GeyserMC");
+            System.out.println("2. Floodgate");
+            System.out.println("3. ViaVersion");
+
+            System.out.print("Enter your choice: ");
+            int choice = scanner.nextInt();
+            String pluginUrl = "";
+            String pluginName = "";
+
+            switch (choice) {
+                case 1:
+                    pluginUrl = PLUGIN_GEEZER_MC_URL;
+                    pluginName = "geyser.jar";
+                    break;
+                case 2:
+                    pluginUrl = PLUGIN_FLOODGATE_URL;
+                    pluginName = "floodgate.jar";
+                    break;
+                case 3:
+                    pluginUrl = PLUGIN_VIAVERSION_URL;
+                    pluginName = "viaversion.jar";
+                    break;
+                default:
+                    System.out.println("Invalid choice.");
+                    return;
+            }
+
+            try {
+                @SuppressWarnings("deprecation")
+                HttpURLConnection connection = (HttpURLConnection) new URL(pluginUrl).openConnection();
+                connection.setRequestMethod("GET");
+                int responseCode = connection.getResponseCode();
+
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    InputStream inputStream = connection.getInputStream();
+                    FileOutputStream fileOutputStream = new FileOutputStream(new File(dir, "plugins/" + pluginName));
+
+                    byte[] buffer = new byte[4096];
+                    int bytesRead;
+                    while ((bytesRead = inputStream.read(buffer)) != -1) {
+                        fileOutputStream.write(buffer, 0, bytesRead);
+                    }
+
+                    inputStream.close();
+                    fileOutputStream.close();
+                    System.out.println("Plugin downloaded to: " + dir + "/" + "plugins" + "/" + pluginName);
+                } else {
+                    System.out.println("Failed to download plugin. HTTP response code: " + responseCode);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+                System.out.println("Error downloading plugin: " + e.getMessage());
+            }
         }
     }
 }
